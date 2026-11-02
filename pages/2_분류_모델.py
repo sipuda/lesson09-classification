@@ -4,7 +4,8 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from sklearn.linear_model import LogisticRegression
-from sklearn.tree import DecisionTreeClassifier, export_text
+from sklearn.tree import DecisionTreeClassifier, export_text, export_graphviz
+from sklearn.tree import _tree
 
 # -----------------------------------------------------------------------------
 # 1. 페이지 설정 및 제목
@@ -142,7 +143,7 @@ c1, c2, c3 = st.columns(3)
 
 with c1:
     st.markdown("### 로지스틱 회귀\n(확률로 답하는 모델)")
-    st.metric(label="테스트 정확도", value=f"{test_acc_dt * 100:.2f}%" if False else f"{test_acc_log * 100:.2f}%") # placeholder to align
+    st.metric(label="테스트 정확도", value=f"{test_acc_log * 100:.2f}%")
     st.caption(f"• 훈련 데이터 정확도: {train_acc_log * 100:.2f}%\n• 테스트 데이터 정확도: {test_acc_log * 100:.2f}%")
 
 with c2:
@@ -162,14 +163,12 @@ st.markdown("---")
 # -----------------------------------------------------------------------------
 st.subheader("📈 로지스틱 회귀 모델 결정 경계 산점도")
 
-# 고른 속성 가운데 시각화를 위해 정확히 2개를 지정하거나, multiselect의 앞선 2개를 가로/세로축으로 삼기
 if len(selected_features) >= 2:
     x_feat = selected_features[0]
     y_feat = selected_features[1]
     x_label = feature_map[x_feat]
     y_label = feature_map[y_feat]
 
-    # 테스트 데이터를 점으로 찍고 실제 뇌졸중 여부 색상 지정 (0: 아님, 1: 뇌졸중)
     df_test_plot = df_test.copy()
     df_test_plot['stroke_str'] = df_test_plot['stroke'].apply(lambda x: '뇌졸중' if x == 1 else '정상')
 
@@ -180,16 +179,12 @@ if len(selected_features) >= 2:
         color_discrete_map={'정상': '#1f77b4', '뇌졸중': '#d62728'}
     )
 
-    # 두 축이 아닌 나머지 속성들은 테스트 데이터의 중앙값에 세워두고 계산하여 경계선 그리기
     other_features = [f for f in selected_features if f not in [x_feat, y_feat]]
     medians = {f: df_train[f].median() for f in other_features}
     
-    median_desc_list = []
-    for f in other_features:
-        median_desc_list.append(f"**{feature_map[f]}** = {medians[f]:.2f}")
+    median_desc_list = [f"**{feature_map[f]}** = {medians[f]:.2f}" for f in other_features]
     median_desc_str = ", ".join(median_desc_list) if median_desc_list else "없음"
 
-    # 격자(Grid) 생성하여 로지스틱 회귀 0.5 확률 선(결정 경계) 그리기
     x_min, x_max = df_test[x_feat].min() - 1, df_test[x_feat].max() + 1
     y_min, y_max = df_test[y_feat].min() - 1, df_test[y_feat].max() + 1
     xx, yy = np.meshgrid(np.linspace(x_min, x_max, 200), np.linspace(y_min, y_max, 200))
@@ -200,10 +195,8 @@ if len(selected_features) >= 2:
     for f in other_features:
         grid_df[f] = medians[f]
     
-    # 훈련에 사용된 전체 속성 순서에 맞추기
     grid_df = grid_df[selected_features]
     
-    # 확률 예측 후 0.5 기준 등고선 추가
     probs = log_reg.predict_proba(grid_df)[:, 1].reshape(xx.shape)
     
     fig.add_trace(go.Contour(
@@ -233,9 +226,6 @@ st.markdown("---")
 # -----------------------------------------------------------------------------
 st.subheader("🌳 의사결정트리 질문 구조 시각화")
 
-# scikit-learn tree를 graphviz DOT 형식으로 변환
-from sklearn.tree import export_graphviz
-
 feature_names_ko = [feature_map[f] for f in selected_features]
 dot_data = export_graphviz(
     dt_clf,
@@ -248,11 +238,7 @@ dot_data = export_graphviz(
     precision=2
 )
 
-# st.graphviz_chart에 DOT 문자열 전달
 st.graphviz_chart(dot_data)
-
-# 트리 구조 요약 분석 추출
-from sklearn.tree import _tree
 
 def get_tree_summary(tree, feature_names):
     tree_ = tree.tree_
@@ -269,7 +255,6 @@ def get_tree_summary(tree, feature_names):
             recurse(tree_.children_right[node])
         else:
             leaf_count += 1
-            # 값 배열에서 정상(0) 인원과 뇌졸중(1) 인원 비교하여 다수가 '정상(아님)'인지 확인
             values = tree_.value[node][0]
             if values[0] > values[1]:
                 negative_leaf_count += 1
@@ -277,7 +262,7 @@ def get_tree_summary(tree, feature_names):
     recurse(0)
     return leaf_count, negative_leaf_count, list(used_features)
 
-total_leaves, neg_leaves, utilized_features = get_tree_summary(dt_clf_, dt_clf if 'dt_clf_' in locals() else dt_clf)
+total_leaves, neg_leaves, utilized_features = get_tree_summary(dt_clf, feature_names_ko)
 
 st.markdown(f"""
 - 📌 **답을 내는 마디(리프 노드)의 총 개수:** 총 {total_leaves}개
